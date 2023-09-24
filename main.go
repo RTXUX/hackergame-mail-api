@@ -20,8 +20,9 @@ const smtpPortKey = "HG_SMTP_PORT"
 const smtpUsernameKey = "HG_SMTP_USERNAME"
 const smtpPasswordKey = "HG_SMTP_PASSWORD"
 const smtpIdentityKey = "HG_SMTP_IDENTITY"
-const smtpFromKey = "HG_SMTP_FROM"
 const listenAddrKey = "HG_LISTEN_ADDR"
+
+const smtpFrom = "hackergame@ustclug.org"
 
 type AppSmtpClient struct {
 	authToken    string
@@ -30,7 +31,6 @@ type AppSmtpClient struct {
 	smtpUsername string
 	smtpPassword string
 	smtpIdentity string
-	smtpFrom     string
 }
 
 func (c *AppSmtpClient) InitSmtpClient() error {
@@ -65,16 +65,12 @@ func (c *AppSmtpClient) InitSmtpClient() error {
 	if !exist {
 		return fmt.Errorf(errTemplate, smtpIdentityKey)
 	}
-	c.smtpFrom, exist = os.LookupEnv(smtpFromKey)
-	if !exist {
-		return fmt.Errorf(errTemplate, smtpFromKey)
-	}
 	return nil
 }
 
 func (c *AppSmtpClient) SendMail(receiver string, subject string, content string) error {
 	headers := map[string]string{
-		"From":    c.smtpFrom,
+		"From":    smtpFrom,
 		"To":      receiver,
 		"Subject": subject,
 	}
@@ -110,8 +106,8 @@ func (c *AppSmtpClient) SendMail(receiver string, subject string, content string
 		return fmt.Errorf("failed to authenticate with %s as %s: %w", c.smtpHost, c.smtpUsername, err)
 	}
 
-	if err = smtpClient.Mail(c.smtpUsername); err != nil {
-		return fmt.Errorf("failed to indicate mail from %s: %w", c.smtpFrom, err)
+	if err = smtpClient.Mail(c.smtpIdentity); err != nil {
+		return fmt.Errorf("failed to indicate mail from %s: %w", c.smtpIdentity, err)
 	}
 
 	if err = smtpClient.Rcpt(receiver); err != nil {
