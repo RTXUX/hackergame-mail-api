@@ -2,7 +2,12 @@ package main
 
 import (
 	"crypto/tls"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"log"
+	"net/http"
 	"net/smtp"
 	"os"
 	"strconv"
@@ -16,6 +21,7 @@ const smtpUsernameKey = "HG_SMTP_USERNAME"
 const smtpPasswordKey = "HG_SMTP_PASSWORD"
 const smtpIdentityKey = "HG_SMTP_IDENTITY"
 const smtpFromKey = "HG_SMTP_FROM"
+const listenAddrKey = "HG_LISTEN_ADDR"
 
 type AppSmtpClient struct {
 	authToken    string
@@ -127,6 +133,105 @@ func (c *AppSmtpClient) SendMail(receiver string, subject string, content string
 	return nil
 }
 
-func main() {
+type HttpError struct {
+	status int
+	err    error
+}
 
+func NewHttpError(status int, err error) *HttpError {
+	return &HttpError{
+		status: status,
+		err:    err,
+	}
+}
+
+type MailApiResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"msg"`
+}
+
+type MailApiRequest struct {
+	To      string `json:"to"`
+	Subject string `json:"subject"`
+	Body    string `json:"body"`
+	IP      string `json:"ip"`
+}
+
+func (h *HttpError) Error() string {
+	return h.err.Error()
+}
+
+func (c *AppSmtpClient) MailApiHandler(w http.ResponseWriter, r *http.Request) error {
+	token := r.Header.Get("Authorization")
+	if len(token) < 7 || !strings.HasPrefix(token, "Bearer") {
+		return NewHttpError(http.StatusUnauthorized, fmt.Errorf("Malformed Token"))
+	}
+	token = token[7:]
+	if token != c.authToken {
+		return NewHttpError(http.StatusUnauthorized, fmt.Errorf("Malformed Token"))
+	}
+	request := MailApiRequest{}
+	reqBuffer := make([]byte, 4096)
+	reqReader := r.Body
+	reqLen, err := reqReader.Read(reqBuffer)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return NewHttpError(http.StatusInternalServerError, fmt.Errorf("failed to read request: %w", err))
+	}
+	reqBuffer = reqBuffer[:reqLen]
+	err = json.Unmarshal(reqBuffer, &request)
+	if err != nil {
+		return NewHttpError(http.StatusBadRequest, fmt.Errorf("failed to parse request: %w", err))
+	}
+	err = c.SendMail(request.To, request.Subject, request.Body)
+	if err != nil {
+		log.Printf("Failed to send mail to %s: %w", request.To, err)
+		return NewHttpError(http.StatusInternalServerError, fmt.Errorf("failed to send mail to %s: %w", request.To, err))
+	}
+	log.Printf("Successfully send mail to %s, from %s", request.To, request.IP)
+	return nil
+}
+
+func (c *AppSmtpClient) MailApiHandlerWrapper(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	err := c.MailApiHandler(w, r)
+	var resp []byte
+	if err != nil {
+		resp, err = json.Marshal(MailApiResponse{
+			Success: false,
+			Message: err.Error(),
+		})
+	} else {
+		resp, err = json.Marshal(MailApiResponse{
+			Success: true,
+			Message: "",
+		})
+	}
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, err = w.Write([]byte(fmt.Errorf("failed to serialize repsonse: %w", err).Error()))
+	} else {
+		w.WriteHeader(http.StatusOK)
+		_, err = w.Write(resp)
+	}
+	if err != nil {
+		log.Fatalf("Failed to write response: %w", err)
+	}
+}
+
+func main() {
+	app := AppSmtpClient{}
+	err := app.InitSmtpClient()
+	if err != nil {
+		log.Fatalf("Failed to initialize: %s", err)
+	}
+	listenAddr, exist := os.LookupEnv(listenAddrKey)
+	if !exist {
+		listenAddr = ":8080"
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/mail", app.MailApiHandlerWrapper)
+	log.Fatal(http.ListenAndServe(listenAddr, mux))
 }
