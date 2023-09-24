@@ -213,7 +213,7 @@ func (c *AppSmtpClient) MailApiHandlerWrapper(w http.ResponseWriter, r *http.Req
 		_, err = w.Write(resp)
 	}
 	if err != nil {
-		log.Fatalf("Failed to write response: %w", err)
+		log.Printf("Failed to write response: %w", err)
 	}
 }
 
