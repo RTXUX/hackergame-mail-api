@@ -70,9 +70,10 @@ func (c *AppSmtpClient) InitSmtpClient() error {
 
 func (c *AppSmtpClient) SendMail(receiver string, subject string, content string) error {
 	headers := map[string]string{
-		"From":    smtpFrom,
-		"To":      receiver,
-		"Subject": subject,
+		"From":         smtpFrom,
+		"To":           receiver,
+		"Subject":      subject,
+		"Content-Type": "text/plain; charset=utf-8",
 	}
 
 	var messageBuilder strings.Builder
